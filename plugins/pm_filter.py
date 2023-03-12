@@ -2,7 +2,8 @@ import asyncio
 import re
 import ast
 import math
-from utils import get_shortlink
+import random
+
 from pyrogram.errors.exceptions.bad_request_400 import MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty
 from Script import script
 import pyrogram
@@ -29,11 +30,22 @@ BUTTONS = {}
 SPELL_CHECK = {}
 FILTER_MODE = {}
 
-@Client.on_message(filters.group & filters.text & filters.incoming)
+@Client.on_message((filters.group | filters.private) & filters.text & filters.incoming)
 async def give_filter(client, message):
-    k = await manual_filters(client, message)
-    if k == False:
-        await auto_filter(client, message) 
+    if message.chat.id != SUPPORT_CHAT_ID:
+        await global_filters(client, message)
+    manual = await manual_filters(client, message)
+    if manual == False:
+        settings = await get_settings(message.chat.id)
+        try:
+            if settings['auto_ffilter']:
+                await auto_filter(client, message)
+        except KeyError:
+            grpid = await active_connection(str(message.from_user.id))
+            await save_group_settings(grpid, 'auto_ffilter', True)
+            settings = await get_settings(message.chat.id)
+            if settings['auto_ffilter']:
+                await auto_filter(client, message) 
 
 @Client.on_message(filters.private & filters.text & filters.incoming)
 async def pm_text(bot, message):
@@ -42,7 +54,7 @@ async def pm_text(bot, message):
     user_id = message.from_user.id
     if content.startswith("/") or content.startswith("#"): return  # ignore commands and hashtags
     if user_id in ADMINS: return # ignore admins
-    await message.reply_text("<b>🎗 If You Want Any Movie, Series Please Join Our Request Groups \n \n 🔆 Request Group: [Click Here 🎗](https://t.me/+ZPpcbtCV204yYWU1)</b>")
+    await message.reply_text("<b>🎗 If You Want Any Movie, Series Please Join Our Request Groups \n \n 🔆 Request Group: [Click Here 🎗](https://t.me/+hvGQ4DApC39hYzVl)</b>")
     await bot.send_message(
         chat_id=LOG_CHANNEL,
         text=f"<b>#𝐏𝐌_𝐌𝐒𝐆\n\nNᴀᴍᴇ : {user}\n\nID : {user_id}\n\nMᴇssᴀɢᴇ : {content}</b>"
@@ -62,7 +74,7 @@ async def next_page(bot, query):
         await query.answer(script.OLD_ALRT_TXT.format(query.from_user.first_name),show_alert=True)
         return
 
-    files, n_offset, total = await get_search_results(search, offset=offset, filter=True)
+    files, n_offset, total = await get_search_results(query.message.chat.id, search, offset=offset, filter=True)
     try:
         n_offset = int(n_offset)
     except:
@@ -71,30 +83,57 @@ async def next_page(bot, query):
     if not files:
         return
     settings = await get_settings(query.message.chat.id)
-    if settings['button']:
-        btn = [
-            [
-                InlineKeyboardButton(
-                    text=f"[{get_size(file.file_size)}] {file.file_name}", 
-                    url=await get_shortlink(f"https://telegram.dog/{temp.U_NAME}?start=files_{file.file_id}")
-                ),
-            ]
-            for file in files
-        ]
+    if 'is_shortlink' in settings.keys():
+        ENABLE_SHORTLINK = settings['is_shortlink']
     else:
-        btn = [
-            [
-                InlineKeyboardButton(
-                    text=f"[{get_size(file.file_size)}] {file.file_name}", 
-                    url=await get_shortlink(f"https://telegram.dog/{temp.U_NAME}?start=files_{file.file_id}")
-                ),
-                InlineKeyboardButton(
-                    text=f"[{get_size(file.file_size)}] {file.file_name}", 
-                    url=await get_shortlink(f"https://telegram.dog/{temp.U_NAME}?start=files_{file.file_id}")
-                ),
+        await save_group_settings(query.message.chat.id, 'is_shortlink', False)
+        ENABLE_SHORTLINK = False
+    if ENABLE_SHORTLINK == True:
+        if settings['button']:
+            btn = [
+                [
+                    InlineKeyboardButton(
+                        text=f"[{get_size(file.file_size)}] {file.file_name}", url=await get_shortlink(query.message.chat.id, f"https://telegram.me/{temp.U_NAME}?start=files_{file.file_id}")
+                    ),
+                ]
+                for file in files
             ]
-            for file in files
-        ]
+        else:
+            btn = [
+                [
+                    InlineKeyboardButton(
+                        text=f"{file.file_name}", url=await get_shortlink(query.message.chat.id, f"https://telegram.me/{temp.U_NAME}?start=files_{file.file_id}")
+                    ),
+                    InlineKeyboardButton(
+                        text=f"{get_size(file.file_size)}",
+                        url=await get_shortlink(query.message.chat.id, f"https://telegram.me/{temp.U_NAME}?start=files_{file.file_id}")
+                    ),
+                ]
+                for file in files
+            ]
+    else:
+        if settings['button']:
+            btn = [
+                [
+                    InlineKeyboardButton(
+                        text=f"[{get_size(file.file_size)}] {file.file_name}", callback_data=f'files#{file.file_id}'
+                    ),
+                ]
+                for file in files
+            ]
+        else:
+            btn = [
+                [
+                    InlineKeyboardButton(
+                        text=f"{file.file_name}", callback_data=f'files#{file.file_id}'
+                    ),
+                    InlineKeyboardButton(
+                        text=f"{get_size(file.file_size)}",
+                        callback_data=f'files_#{file.file_id}',
+                    ),
+                ]
+                for file in files
+            ]
     try:
         if settings['auto_delete']:
             btn.insert(0, 
@@ -114,9 +153,9 @@ async def next_page(bot, query):
             )
                 
     except KeyError:
-        grpid = await active_connection(str(message.from_user.id))
+        grpid = await active_connection(str(query.message.from_user.id))
         await save_group_settings(grpid, 'auto_delete', True)
-        settings = await get_settings(message.chat.id)
+        settings = await get_settings(query.message.chat.id)
         if settings['auto_delete']:
             btn.insert(0, 
                 [
@@ -133,27 +172,95 @@ async def next_page(bot, query):
                     InlineKeyboardButton(f'Series 🔆', 'sinfo')
                 ]
             )
-
-    if 0 < offset <= 10:
-        off_set = 0
-    elif offset == 0:
-        off_set = None
-    else:
-        off_set = offset - 10
-    if n_offset == 0:
-        btn.append(
-            [InlineKeyboardButton("⌫ 𝐁𝐀𝐂𝐊", callback_data=f"next_{req}_{key}_{off_set}"), InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages")]
-        )
-    elif off_set is None:
-        btn.append([InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_{req}_{key}_{n_offset}")])
-    else:
-        btn.append(
-            [
-                InlineKeyboardButton("⌫ 𝐁𝐀𝐂𝐊", callback_data=f"next_{req}_{key}_{off_set}"),
-                InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"),
-                InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_{req}_{key}_{n_offset}")
-            ],
-        )
+    try:
+        settings = await get_settings(query.message.chat.id)
+        if settings['max_btn']:
+            if 0 < offset <= 10:
+                off_set = 0
+            elif offset == 0:
+                off_set = None
+            else:
+                off_set = offset - 10
+            if n_offset == 0:
+                btn.append(
+                    [InlineKeyboardButton("⌫ 𝐁𝐀𝐂𝐊", callback_data=f"next_{req}_{key}_{off_set}"), InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages")]
+                )
+            elif off_set is None:
+                btn.append([InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_{req}_{key}_{n_offset}")])
+            else:
+                btn.append(
+                    [
+                        InlineKeyboardButton("⌫ 𝐁𝐀𝐂𝐊", callback_data=f"next_{req}_{key}_{off_set}"),
+                        InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"),
+                        InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_{req}_{key}_{n_offset}")
+                    ],
+                )
+        else:
+            if 0 < offset <= int(MAX_B_TN):
+                off_set = 0
+            elif offset == 0:
+                off_set = None
+            else:
+                off_set = offset - int(MAX_B_TN)
+            if n_offset == 0:
+                btn.append(
+                    [InlineKeyboardButton("⌫ 𝐁𝐀𝐂𝐊", callback_data=f"next_{req}_{key}_{off_set}"), InlineKeyboardButton(f"{math.ceil(int(offset)/int(MAX_B_TN))+1} / {math.ceil(total/int(MAX_B_TN))}", callback_data="pages")]
+                )
+            elif off_set is None:
+                btn.append([InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"{math.ceil(int(offset)/int(MAX_B_TN))+1} / {math.ceil(total/int(MAX_B_TN))}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_{req}_{key}_{n_offset}")])
+            else:
+                btn.append(
+                    [
+                        InlineKeyboardButton("⌫ 𝐁𝐀𝐂𝐊", callback_data=f"next_{req}_{key}_{off_set}"),
+                        InlineKeyboardButton(f"{math.ceil(int(offset)/int(MAX_B_TN))+1} / {math.ceil(total/int(MAX_B_TN))}", callback_data="pages"),
+                        InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_{req}_{key}_{n_offset}")
+                    ],
+                )
+    except KeyError:
+        await save_group_settings(query.message.chat.id, 'max_btn', False)
+        settings = await get_settings(query.message.chat.id)
+        if settings['max_btn']:
+            if 0 < offset <= 10:
+                off_set = 0
+            elif offset == 0:
+                off_set = None
+            else:
+                off_set = offset - 10
+            if n_offset == 0:
+                btn.append(
+                    [InlineKeyboardButton("⌫ 𝐁𝐀𝐂𝐊", callback_data=f"next_{req}_{key}_{off_set}"), InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages")]
+                )
+            elif off_set is None:
+                btn.append([InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_{req}_{key}_{n_offset}")])
+            else:
+                btn.append(
+                    [
+                        InlineKeyboardButton("⌫ 𝐁𝐀𝐂𝐊", callback_data=f"next_{req}_{key}_{off_set}"),
+                        InlineKeyboardButton(f"{math.ceil(int(offset)/10)+1} / {math.ceil(total/10)}", callback_data="pages"),
+                        InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_{req}_{key}_{n_offset}")
+                    ],
+                )
+        else:
+            if 0 < offset <= int(MAX_B_TN):
+                off_set = 0
+            elif offset == 0:
+                off_set = None
+            else:
+                off_set = offset - int(MAX_B_TN)
+            if n_offset == 0:
+                btn.append(
+                    [InlineKeyboardButton("⌫ 𝐁𝐀𝐂𝐊", callback_data=f"next_{req}_{key}_{off_set}"), InlineKeyboardButton(f"{math.ceil(int(offset)/int(MAX_B_TN))+1} / {math.ceil(total/int(MAX_B_TN))}", callback_data="pages")]
+                )
+            elif off_set is None:
+                btn.append([InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(f"{math.ceil(int(offset)/int(MAX_B_TN))+1} / {math.ceil(total/int(MAX_B_TN))}", callback_data="pages"), InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_{req}_{key}_{n_offset}")])
+            else:
+                btn.append(
+                    [
+                        InlineKeyboardButton("⌫ 𝐁𝐀𝐂𝐊", callback_data=f"next_{req}_{key}_{off_set}"),
+                        InlineKeyboardButton(f"{math.ceil(int(offset)/int(MAX_B_TN))+1} / {math.ceil(total/int(MAX_B_TN))}", callback_data="pages"),
+                        InlineKeyboardButton("𝐍𝐄𝐗𝐓 ➪", callback_data=f"next_{req}_{key}_{n_offset}")
+                    ],
+                )
     btn.insert(0, [
         InlineKeyboardButton("🔻 How To Download 🔻", url=f"https://t.me/tnlinkdown/6")
     ])
@@ -676,6 +783,18 @@ async def cb_handler(client: Client, query: CallbackQuery):
                                          callback_data=f'setgs#auto_ffilter#{settings["auto_ffilter"]}#{str(grp_id)}'),
                     InlineKeyboardButton('✔ Oɴ' if settings["auto_ffilter"] else '✘ Oғғ',
                                          callback_data=f'setgs#auto_ffilter#{settings["auto_ffilter"]}#{str(grp_id)}')
+                ],
+                [
+                    InlineKeyboardButton('Mᴀx Bᴜᴛᴛᴏɴs',
+                                         callback_data=f'setgs#max_btn#{settings["max_btn"]}#{str(grp_id)}'),
+                    InlineKeyboardButton('10' if settings["max_btn"] else f'{MAX_B_TN}',
+                                         callback_data=f'setgs#max_btn#{settings["max_btn"]}#{str(grp_id)}')
+                ],
+                [
+                    InlineKeyboardButton('ShortLink',
+                                         callback_data=f'setgs#is_shortlink#{settings["is_shortlink"]}#{str(grp_id)}'),
+                    InlineKeyboardButton('✔ Oɴ' if settings["is_shortlink"] else '✘ Oғғ',
+                                         callback_data=f'setgs#is_shortlink#{settings["is_shortlink"]}#{str(grp_id)}')
                 ]
             ]
             reply_markup = InlineKeyboardMarkup(buttons)
@@ -1076,6 +1195,18 @@ async def cb_handler(client: Client, query: CallbackQuery):
                                          callback_data=f'setgs#auto_ffilter#{settings["auto_ffilter"]}#{str(grp_id)}'),
                     InlineKeyboardButton('✔ Oɴ' if settings["auto_ffilter"] else '✘ Oғғ',
                                          callback_data=f'setgs#auto_ffilter#{settings["auto_ffilter"]}#{str(grp_id)}')
+                ],
+                [
+                    InlineKeyboardButton('Mᴀx Bᴜᴛᴛᴏɴs',
+                                         callback_data=f'setgs#max_btn#{settings["max_btn"]}#{str(grp_id)}'),
+                    InlineKeyboardButton('10' if settings["max_btn"] else f'{MAX_B_TN}',
+                                         callback_data=f'setgs#max_btn#{settings["max_btn"]}#{str(grp_id)}')
+                ],
+                [
+                    InlineKeyboardButton('ShortLink',
+                                         callback_data=f'setgs#is_shortlink#{settings["is_shortlink"]}#{str(grp_id)}'),
+                    InlineKeyboardButton('✔ Oɴ' if settings["is_shortlink"] else '✘ Oғғ',
+                                         callback_data=f'setgs#is_shortlink#{settings["is_shortlink"]}#{str(grp_id)}')
                 ]
             ]
             reply_markup = InlineKeyboardMarkup(buttons)
@@ -1094,45 +1225,74 @@ async def auto_filter(client, msg, spoll=False):
             return
         if len(message.text) < 100:
             search = message.text
-            files, offset, total_results = await get_search_results(search.lower(), offset=0, filter=True)
+            files, offset, total_results = await get_search_results(message.chat.id ,search.lower(), offset=0, filter=True)
             if not files:
                 if settings["spell_check"]:
                     return await advantage_spell_chok(client, msg)
                 else:
-                    await client.send_message(chat_id=LOG_CHANNEL, text=(script.NORSLTS.format(reqstr.id, reqstr.mention, search)))
+                    if NO_RESULTS_MSG:
+                        await client.send_message(chat_id=REQUEST_LOGS, text=(script.NORSLTS.format(reqstr.id, reqstr.mention, search)))
                     return
         else:
             return
     else:
-        settings = await get_settings(msg.message.chat.id)
         message = msg.message.reply_to_message  # msg will be callback query
         search, files, offset, total_results = spoll
-    pre = 'filep' if settings['file_secure'] else 'file'
-    if settings["button"]:
-        btn = [
-            [
-                InlineKeyboardButton(
-                    text=f"[{get_size(file.file_size)}] {file.file_name}", 
-                    url=await get_shortlink(f"https://telegram.dog/{temp.U_NAME}?start=files_{file.file_id}")
-                ),
-            ]
-            for file in files
-        ]
+    settings = await get_settings(message.chat.id)
+    if 'is_shortlink' in settings.keys():
+        ENABLE_SHORTLINK = settings['is_shortlink']
     else:
-        btn = [
-            [
-                InlineKeyboardButton(
-                    text=f"[{get_size(file.file_size)}] {file.file_name}", 
-                    url=await get_shortlink(f"https://telegram.dog/{temp.U_NAME}?start=files_{file.file_id}")
-                ),
-                InlineKeyboardButton(
-                    text=f"[{get_size(file.file_size)}] {file.file_name}", 
-                    url=await get_shortlink(f"https://telegram.dog/{temp.U_NAME}?start=files_{file.file_id}")
-                ),
+        await save_group_settings(message.chat.id, 'is_shortlink', False)
+        ENABLE_SHORTLINK = False
+    pre = 'filep' if settings['file_secure'] else 'file'
+    if ENABLE_SHORTLINK == True:
+        if settings["button"]:
+            btn = [
+                [
+                    InlineKeyboardButton(
+                        text=f"[{get_size(file.file_size)}] {file.file_name}", url=await get_shortlink(message.chat.id, f"https://telegram.me/{temp.U_NAME}?start=files_{file.file_id}")
+                    ),
+                ]
+                for file in files
             ]
-            for file in files
-        ]
-
+        else:
+            btn = [
+                [
+                    InlineKeyboardButton(
+                        text=f"{file.file_name}",
+                        url=await get_shortlink(message.chat.id, f"https://telegram.me/{temp.U_NAME}?start=files_{file.file_id}")
+                    ),
+                    InlineKeyboardButton(
+                        text=f"{get_size(file.file_size)}",
+                        url=await get_shortlink(message.chat.id, f"https://telegram.me/{temp.U_NAME}?start=files_{file.file_id}")
+                    ),
+                ]
+                for file in files
+            ]
+    else:
+        if settings["button"]:
+            btn = [
+                [
+                    InlineKeyboardButton(
+                        text=f"[{get_size(file.file_size)}] {file.file_name}", callback_data=f'{pre}#{file.file_id}'
+                    ),
+                ]
+                for file in files
+            ]
+        else:
+            btn = [
+                [
+                    InlineKeyboardButton(
+                        text=f"{file.file_name}",
+                        callback_data=f'{pre}#{file.file_id}',
+                    ),
+                    InlineKeyboardButton(
+                        text=f"{get_size(file.file_size)}",
+                        callback_data=f'{pre}#{file.file_id}',
+                    ),
+                ]
+                for file in files
+            ]
     try:
         if settings['auto_delete']:
             btn.insert(0, 
@@ -1173,16 +1333,34 @@ async def auto_filter(client, msg, spoll=False):
             )
 
     btn.insert(0, [
-        InlineKeyboardButton("‼️ How To Download ⁉️", url=f"t.me/tnlinkdown/6")
+        InlineKeyboardButton("‼️ How To Download ⁉️", url=f"https://t.me/tnlinkdown/6")
     ])
 
     if offset != "":
         key = f"{message.chat.id}-{message.id}"
         BUTTONS[key] = search
         req = message.from_user.id if message.from_user else 0
-        btn.append(
-            [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(text=f"1/{math.ceil(int(total_results)/10)}",callback_data="pages"), InlineKeyboardButton(text="𝐍𝐄𝐗𝐓 ➪",callback_data=f"next_{req}_{key}_{offset}")]
-        )
+        try:
+            settings = await get_settings(message.chat.id)
+            if settings['max_btn']:
+                btn.append(
+                    [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(text=f"1/{math.ceil(int(total_results)/10)}",callback_data="pages"), InlineKeyboardButton(text="𝐍𝐄𝐗𝐓 ➪",callback_data=f"next_{req}_{key}_{offset}")]
+                )
+            else:
+                btn.append(
+                    [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(text=f"1/{math.ceil(int(total_results)/int(MAX_B_TN))}",callback_data="pages"), InlineKeyboardButton(text="𝐍𝐄𝐗𝐓 ➪",callback_data=f"next_{req}_{key}_{offset}")]
+                )
+        except KeyError:
+            await save_group_settings(message.chat.id, 'max_btn', False)
+            settings = await get_settings(message.chat.id)
+            if settings['max_btn']:
+                btn.append(
+                    [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(text=f"1/{math.ceil(int(total_results)/10)}",callback_data="pages"), InlineKeyboardButton(text="𝐍𝐄𝐗𝐓 ➪",callback_data=f"next_{req}_{key}_{offset}")]
+                )
+            else:
+                btn.append(
+                    [InlineKeyboardButton("𝐏𝐀𝐆𝐄", callback_data="pages"), InlineKeyboardButton(text=f"1/{math.ceil(int(total_results)/int(MAX_B_TN))}",callback_data="pages"), InlineKeyboardButton(text="𝐍𝐄𝐗𝐓 ➪",callback_data=f"next_{req}_{key}_{offset}")]
+                )
     else:
         btn.append(
             [InlineKeyboardButton(text="𝐍𝐎 𝐌𝐎𝐑𝐄 𝐏𝐀𝐆𝐄𝐒 𝐀𝐕𝐀𝐈𝐋𝐀𝐁𝐋𝐄",callback_data="pages")]
