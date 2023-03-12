@@ -14,3 +14,4 @@ imdbpy==2022.7.9
 cinemagoer
 datetime
 aiohttp
+git+https://github.com/Joelkb/cinemagoer
