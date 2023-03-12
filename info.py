@@ -1,6 +1,7 @@
 #Coded By @JonSnow11
 import re
 from os import environ
+from Script import script 
 
 id_pattern = re.compile(r'^.\d+$')
 def is_enabled(value, default):
@@ -47,8 +48,9 @@ COLLECTION_NAME = environ.get('COLLECTION_NAME', 'rxmov_files')
 PORT = environ.get("PORT", "8080")
 GRP_LNK = environ.get('GRP_LNK', 'https://t.me/+ZPpcbtCV204yYWU1')
 CHNL_LNK = environ.get('CHNL_LNK', 'https://t.me/RolexMoviesOXO')
-SHORTENER_WEBSITE = environ.get('SHORTENER_WEBSITE', 'droplink.co')
-API_TOKEN = environ.get('API_TOKEN', '7b8f6186f757ca317538f68e9ebaaf05780bc330')
+SHORTLINK_URL = environ.get('SHORTLINK_URL', 'easysky.in')
+SHORTLINK_API = environ.get('SHORTLINK_API', 'c0c9fb160a5d33bb141ce117e2cce939a36a9682')
+IS_SHORTLINK = bool(environ.get('IS_SHORTLINK', True))
 MSG_ALRT = environ.get('MSG_ALRT', '🚩 @RolexMoviesOXO Best Channel In Telegram')
 LOG_CHANNEL = int(environ.get('LOG_CHANNEL', '-1001660274107'))
 SUPPORT_CHAT = environ.get('SUPPORT_CHAT', 'RolexMoviesOXO')
